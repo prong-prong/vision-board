@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>나의 비전보드</title>
+<!-- PWA: 설치 가능 + 오프라인 -->
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#c85f3e" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="비전보드" />
+<!-- PNG 내보내기용 라이브러리 (CDN) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+  :root {
+    --bg: #f4f1ea;
+    --panel: #ffffff;
+    --accent: #e07a5f;
+    --text: #3d405b;
+    --shadow: 0 4px 16px rgba(0,0,0,.12);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+    background: var(--panel);
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  header h1 {
+    font-size: 18px;
+    margin: 0 12px 0 0;
+    white-space: nowrap;
+  }
+  button {
+    font: inherit;
+    font-size: 14px;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    background: #eceae3;
+    color: var(--text);
+    cursor: pointer;
+    transition: background .15s, transform .05s;
+  }
+  button:hover { background: #ddd9cf; }
+  button:active { transform: scale(.97); }
+  button.primary { background: var(--accent); color: #fff; }
+  button.primary:hover { background: #cf6a50; }
+  .spacer { flex: 1; }
+  #board {
+    position: relative;
+    margin: 24px auto;
+    width: 1000px;
+    max-width: 95vw;
+    height: 640px;
+    background: var(--panel);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .item {
+    position: absolute;
+    cursor: grab;
+    user-select: none;
+    border-radius: 10px;
+    touch-action: none;           /* 터치 드래그가 화면 스크롤로 새지 않도록 */
+  }
+  .item.dragging { cursor: grabbing; box-shadow: var(--shadow); }
+  .item.editing { touch-action: auto; }      /* 편집 중엔 터치로 커서 이동 가능 */
+  .item.editing .text { cursor: text; user-select: text; }
+  .item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 10px;
+    pointer-events: none;
+    display: block;
+  }
+  .item .text {
+    width: 100%;
+    height: 100%;
+    padding: 12px;
+    background: #fffbe8;
+    border-radius: 10px;
+    font-size: 18px;
+    line-height: 1.4;
+    overflow: auto;
+    outline: none;
+    box-shadow: var(--shadow);
+  }
+  /* 크기 조절 핸들 */
+  .handle {
+    position: absolute;
+    right: -6px;
+    bottom: -6px;
+    width: 16px;
+    height: 16px;
+    background: var(--accent);
+    border: 2px solid #fff;
+    border-radius: 50%;
+    cursor: nwse-resize;
+    display: none;
+  }
+  /* 삭제 버튼 */
+  .del {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    width: 22px;
+    height: 22px;
+    line-height: 18px;
+    text-align: center;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 14px;
+    display: none;
+  }
+  /* 편집 버튼 */
+  .edit {
+    position: absolute;
+    top: -8px;
+    left: -8px;
+    width: 22px;
+    height: 22px;
+    line-height: 20px;
+    text-align: center;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 12px;
+    display: none;
+  }
+  .item.selected { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .item.selected .handle,
+  .item.selected .del,
+  .item.selected .edit { display: block; }
+  .hint {
+    text-align: center;
+    color: #9a978d;
+    font-size: 13px;
+    margin: -8px 0 20px;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>🌱 나의 비전보드</h1>
+    <button class="primary" id="addImage">＋ 이미지</button>
+    <button id="addText">＋ 텍스트</button>
+    <input type="file" id="fileInput" accept="image/*" hidden />
+    <div class="spacer"></div>
+    <button id="exportPng">PNG 저장</button>
+    <button id="exportJson">백업(JSON)</button>
+    <button id="importJson">불러오기</button>
+    <input type="file" id="jsonInput" accept="application/json" hidden />
+    <button id="clearAll">전체 삭제</button>
+  </header>
+
+  <div id="board"></div>
+  <p class="hint">항목을 탭해 선택 · 드래그로 이동 · 모서리 점으로 크기 조절 · 텍스트는 ✏️ 버튼으로 편집 · 변경사항은 자동 저장돼요</p>
+
+<script>
+(function () {
+  "use strict";
+
+  const board = document.getElementById("board");
+  const STORAGE_KEY = "visionboard.items";
+  let items = [];          // {id, type, x, y, w, h, src?, text?}
+  let selectedId = null;
+  let uid = 1;
+
+  // ---------- 저장 / 불러오기 ----------
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        items = JSON.parse(raw);
+        uid = items.reduce((m, it) => Math.max(m, it.id), 0) + 1;
+      }
+    } catch (e) { items = []; }
+    render();
+  }
+
+  // ---------- 렌더링 ----------
+  function render() {
+    board.innerHTML = "";
+    items.forEach(function (it) {
+      const el = document.createElement("div");
+      el.className = "item" + (it.id === selectedId ? " selected" : "");
+      el.style.left = it.x + "px";
+      el.style.top = it.y + "px";
+      el.style.width = it.w + "px";
+      el.style.height = it.h + "px";
+      el.dataset.id = it.id;
+
+      if (it.type === "image") {
+        const img = document.createElement("img");
+        img.src = it.src;
+        el.appendChild(img);
+      } else {
+        const t = document.createElement("div");
+        t.className = "text";
+        t.textContent = it.text;
+        t.contentEditable = "false";
+        t.addEventListener("dblclick", function () { enterEdit(it); });
+        t.addEventListener("input", function () { it.text = t.textContent; });
+        t.addEventListener("blur", function () {
+          el.classList.remove("editing");
+          t.contentEditable = "false";
+          it.text = t.textContent;
+          save();
+        });
+        el.appendChild(t);
+
+        // 편집 버튼 (텍스트 전용)
+        const edit = document.createElement("div");
+        edit.className = "edit";
+        edit.textContent = "✏️";
+        edit.title = "편집";
+        edit.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+        edit.addEventListener("click", function (e) {
+          e.stopPropagation();
+          enterEdit(it);
+        });
+        el.appendChild(edit);
+      }
+
+      const del = document.createElement("div");
+      del.className = "del";
+      del.textContent = "×";
+      del.title = "삭제";
+      del.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+      del.addEventListener("click", function (e) {
+        e.stopPropagation();
+        items = items.filter(function (x) { return x.id !== it.id; });
+        selectedId = null;
+        save(); render();
+      });
+      el.appendChild(del);
+
+      const handle = document.createElement("div");
+      handle.className = "handle";
+      handle.addEventListener("pointerdown", function (e) { startResize(e, it); });
+      el.appendChild(handle);
+
+      el.addEventListener("pointerdown", function (e) { startDrag(e, it); });
+      board.appendChild(el);
+    });
+  }
+
+  // ---------- 텍스트 편집 모드 진입 ----------
+  function enterEdit(it) {
+    selectedId = it.id;
+    render();
+    const el = board.querySelector('[data-id="' + it.id + '"]');
+    if (!el) return;
+    const t = el.querySelector(".text");
+    if (!t) return;
+    el.classList.add("editing");
+    t.contentEditable = "true";
+    t.focus();
+    // 커서를 글자 맨 끝으로
+    const range = document.createRange();
+    range.selectNodeContents(t);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  // ---------- 드래그 이동 (포인터 = 마우스+터치 모두) ----------
+  function startDrag(e, it) {
+    if (e.target.classList.contains("handle") ||
+        e.target.classList.contains("del") ||
+        e.target.classList.contains("edit")) return;
+    const cur = board.querySelector('[data-id="' + it.id + '"]');
+    if (cur && cur.classList.contains("editing")) return; // 편집 중엔 드래그 안 함
+    e.preventDefault();
+    selectedId = it.id;
+    render();
+    const startX = e.clientX, startY = e.clientY;
+    const origX = it.x, origY = it.y;
+    const el = board.querySelector('[data-id="' + it.id + '"]');
+    el.classList.add("dragging");
+
+    function move(ev) {
+      it.x = clamp(origX + (ev.clientX - startX), 0, board.clientWidth - it.w);
+      it.y = clamp(origY + (ev.clientY - startY), 0, board.clientHeight - it.h);
+      el.style.left = it.x + "px";
+      el.style.top = it.y + "px";
+    }
+    function up() {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", up);
+      el.classList.remove("dragging");
+      save();
+    }
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", up);
+  }
+
+  // ---------- 크기 조절 ----------
+  function startResize(e, it) {
+    e.stopPropagation();
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    const origW = it.w, origH = it.h;
+    const el = board.querySelector('[data-id="' + it.id + '"]');
+
+    function move(ev) {
+      it.w = Math.max(60, origW + (ev.clientX - startX));
+      it.h = Math.max(40, origH + (ev.clientY - startY));
+      el.style.width = it.w + "px";
+      el.style.height = it.h + "px";
+    }
+    function up() {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", up);
+      save();
+    }
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", up);
+  }
+
+  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+  // 빈 곳 탭 시 선택 해제
+  board.addEventListener("pointerdown", function (e) {
+    if (e.target === board) { selectedId = null; render(); }
+  });
+
+  // ---------- 항목 추가 ----------
+  document.getElementById("addImage").addEventListener("click", function () {
+    document.getElementById("fileInput").click();
+  });
+  document.getElementById("fileInput").addEventListener("change", function (e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function () {
+      items.push({ id: uid++, type: "image", x: 60, y: 60, w: 240, h: 240, src: reader.result });
+      save(); render();
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  });
+
+  document.getElementById("addText").addEventListener("click", function () {
+    items.push({ id: uid++, type: "text", x: 80, y: 80, w: 220, h: 120, text: "목표를 적어보세요 ✨" });
+    save(); render();
+  });
+
+  // ---------- 내보내기 ----------
+  document.getElementById("exportPng").addEventListener("click", function () {
+    const prev = selectedId; selectedId = null; render();
+    html2canvas(board, { backgroundColor: "#ffffff", scale: 2 }).then(function (canvas) {
+      const a = document.createElement("a");
+      a.download = "비전보드.png";
+      a.href = canvas.toDataURL("image/png");
+      a.click();
+      selectedId = prev; render();
+    });
+  });
+
+  document.getElementById("exportJson").addEventListener("click", function () {
+    const blob = new Blob([JSON.stringify(items)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.download = "비전보드-백업.json";
+    a.href = URL.createObjectURL(blob);
+    a.click();
+  });
+
+  document.getElementById("importJson").addEventListener("click", function () {
+    document.getElementById("jsonInput").click();
+  });
+  document.getElementById("jsonInput").addEventListener("change", function (e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function () {
+      try {
+        items = JSON.parse(reader.result);
+        uid = items.reduce(function (m, it) { return Math.max(m, it.id); }, 0) + 1;
+        selectedId = null;
+        save(); render();
+      } catch (err) { alert("불러오기에 실패했어요. JSON 파일을 확인해 주세요."); }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  });
+
+  document.getElementById("clearAll").addEventListener("click", function () {
+    if (confirm("보드의 모든 항목을 삭제할까요?")) {
+      items = []; selectedId = null; save(); render();
+    }
+  });
+
+  load();
+
+  // ---------- PWA: 서비스 워커 등록 ----------
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("sw.js").catch(function () {});
+    });
+  }
+})();
+</script>
+</body>
+</html>
